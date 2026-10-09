@@ -1,0 +1,52 @@
+//@version=6
+indicator(title="NXS Kinetic Engine", shorttitle="NXS KE", format=format.volume)
+
+// --- Engine Inputs ---
+volThreshold = input.float(0.80, title="Volume Threshold (%)", tooltip="Requires current volume to be at least 80% of the session's highest volume bar.", minval=0.1, maxval=1.0, step=0.05)
+absThreshold = input.float(0.80, title="Absorption Threshold (%)", tooltip="Requires current absorption to be at least 80% of the session's highest absorption.", minval=0.1, maxval=1.0, step=0.05)
+
+// The Session Filter: Formatted as HHMM-HHMM. 
+// Default is set to wake the engine up at 10:00 AM and shut it down at 4:00 PM.
+activeSession = input.session("1000-1600", title="Active Session Window")
+
+// --- Session Baseline Tracking ---
+isNewDay = time("D") != time("D")[1]
+
+// Evaluates whether the current 5-second bar falls inside the active session.
+// Uses the exchange's timezone (syminfo.timezone) to prevent errors if your computer clock changes.
+inSession = not na(time(timeframe.period, activeSession, syminfo.timezone))
+
+var float sessionMaxVol = 0.0
+var float sessionMaxAbs = 0.0
+
+// Wipes the slate clean at the start of every new day.
+if isNewDay
+    sessionMaxVol := 0.0
+    sessionMaxAbs := 0.0
+
+// --- Layer 1: Absolute Volume Ratio ---
+currentVol = nz(volume)
+
+// --- Layer 2: Kinetic Absorption ---
+candleSpread = math.max(high - low, syminfo.mintick)
+currentAbs = currentVol / candleSpread
+
+// ONLY update the session maximums if we are inside the active trading window.
+// This prevents the 9:30 AM open from warping the mathematical baseline.
+if inSession
+    sessionMaxVol := math.max(sessionMaxVol, currentVol)
+    sessionMaxAbs := math.max(sessionMaxAbs, currentAbs)
+
+// --- Execution Logic Gates ---
+// The engine remains strictly dead (false) if the current time is outside the session window.
+isHighVol = inSession and (currentVol >= (sessionMaxVol * volThreshold))
+isHighAbs = inSession and (currentAbs >= (sessionMaxAbs * absThreshold))
+    
+isCapitulation = isHighVol and isHighAbs
+
+// --- Visual Output ---
+// Outside of 10:00 - 16:00, every single volume bar will print as translucent gray background noise.
+volColor = isHighVol ? color.white : color.rgb(120, 123, 134, 50)
+plot(currentVol, title="Absolute Volume", color=volColor, style=plot.style_columns)
+
+plotshape(isCapitulation ? currentVol : na, title="Absorption Trigger", style=shape.diamond, location=location.absolute, color=color.purple, size=size.small)
